@@ -38,15 +38,14 @@ class ModeloRNE:
         for room in rooms:
             try:
                 nombre = room.Name or "Sin nombre"
-
                 nivel = room.Level.Name if room.Level else "Sin nivel"
                 area = round(room.Area / 10.7639, 2)  # pies² a m²
-
                 altura_param = room.get_Parameter(BuiltInParameter.ROOM_UPPER_OFFSET)
                 altura = round(altura_param.AsDouble() * 0.3048, 2) if altura_param else 0.0
+                room_id = room.Id.IntegerValue
 
-                self.ambientes.append((nombre, nivel, area, altura, nombre))  # usamos 'nombre' como uso
-                print(f"✅ Room: {nombre}, Nivel: {nivel}, Área: {area} m², Altura: {altura} m")
+                self.ambientes.append((nombre, nivel, area, altura, nombre, room_id))  # ahora incluye el ID
+                print(f"✅ Room: {nombre}, Nivel: {nivel}, Área: {area} m², Altura: {altura} m, ID: {room_id}")
 
             except Exception as e:
                 print(f"⚠️ Error procesando un Room: {e}")
@@ -87,12 +86,12 @@ elementos_info = []
 
 # Agregar datos de habitaciones (ambientes) al CSV
 for ambiente in modelo.ambientes:
-    nombre, nivel, area, altura, uso = ambiente
+    nombre, nivel, area, altura, uso, room_id = ambiente
     info_room = {
         "Categoría": "Habitaciones",
         "Elemento": nombre,
         "Tipo": uso,
-        "ID": "",
+        "ID": room_id,
         "Nivel": nivel,
         "Area (m²)": area,
         "Altura (m)": altura

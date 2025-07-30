@@ -19,6 +19,8 @@ from System.Windows.Media import SolidColorBrush, Color, Brushes
 
 import System
 import json
+from Autodesk.Revit.DB import ElementId
+from System.Collections.Generic import List
 
 class NormasWindow(Window):
     def __init__(self, categoria, normas, actualizar_callback=None):
@@ -153,7 +155,7 @@ class NormasWindow(Window):
 class ChatBotWindow(Window):
     def __init__(self):
         self.Title = "Chatbot"
-        self.Width = 540
+        self.Width = 840
         self.Height = 500
         self.Background = SolidColorBrush(Color.FromRgb(245,245,245))
 
@@ -205,13 +207,21 @@ class ChatBotWindow(Window):
         Grid.SetRow(self.tab_control, 1)
         grid.Children.Add(self.tab_control)
 
-        # Bottom panel
+        # Panel inferior
         bottom_panel = StackPanel()
-        bottom_panel.Orientation = 0 # Horizontal
-        bottom_panel.HorizontalAlignment = HorizontalAlignment.Center  # <-- Centraliza los botones
+        bottom_panel.Orientation = Orientation.Horizontal
+        bottom_panel.HorizontalAlignment = HorizontalAlignment.Center
         bottom_panel.VerticalAlignment = VerticalAlignment.Bottom
         bottom_panel.Margin = Thickness(0,0,0,10)
 
+        # ComboBox para mostrar elementos verificados
+        self.verificados_combo = Controls.ComboBox()
+        self.verificados_combo.Width = 180
+        self.verificados_combo.Height = 32
+        self.verificados_combo.Margin = Thickness(0,0,10,0)
+        self.verificados_combo.Items.Add("Elementos verificados...")
+
+        # Boton para verificar cumplimiento de normas
         self.send_button = Button()
         self.send_button.Content = "Verificar cumplimiento de normas"
         self.send_button.Width = 210
@@ -222,6 +232,7 @@ class ChatBotWindow(Window):
         self.send_button.Click += self.on_send_click
         self.send_button.Margin = Thickness(0,0,10,0)
 
+        # Boton para ver normas aplicadas
         self.normas_button = Button()
         self.normas_button.Content = "Ver normas aplicadas"
         self.normas_button.Width = 180
@@ -231,10 +242,91 @@ class ChatBotWindow(Window):
         self.normas_button.FontWeight = FontWeights.Bold
         self.normas_button.Click += self.on_normas_click
 
+        # Boton para seleccionar el elemento en el plano
+        self.seleccionar_plano_button = Button()
+        self.seleccionar_plano_button.Content = "Seleccionar en plano"
+        self.seleccionar_plano_button.Width = 160
+        self.seleccionar_plano_button.Height = 34
+        self.seleccionar_plano_button.Background = SolidColorBrush(Color.FromRgb(241,196,15))
+        self.seleccionar_plano_button.Foreground = Brushes.Black
+        self.seleccionar_plano_button.FontWeight = FontWeights.Bold
+        self.seleccionar_plano_button.Click += self.on_seleccionar_plano_click
+        self.seleccionar_plano_button.Margin = Thickness(0,0,10,0)
+
+        # Agrega los controles al panel inferior
+        bottom_panel.Children.Add(self.verificados_combo)
+        bottom_panel.Children.Add(self.seleccionar_plano_button)
         bottom_panel.Children.Add(self.send_button)
         bottom_panel.Children.Add(self.normas_button)
         Grid.SetRow(bottom_panel, 2)
         grid.Children.Add(bottom_panel)
+
+        # Diccionario para almacenar elementos verificados por categoria
+        self.elementos_verificados_por_categoria = {cat: [] for cat in self.categorias}
+
+        # Evento para actualizar ComboBox al cambiar de pestana
+        self.tab_control.SelectionChanged += self.on_tab_changed
+
+        # Agrega el evento para el ComboBox
+        self.verificados_combo.SelectionChanged += self.on_verificado_seleccionado
+
+        def on_tab_changed(self, sender, event):
+            selected_tab = self.tab_control.SelectedItem
+            if selected_tab:
+                categoria = selected_tab.Header
+                self.actualizar_combo_verificados(categoria)
+
+        def actualizar_combo_verificados(self, categoria):
+            self.verificados_combo.Items.Clear()
+            self.verificados_combo.Items.Add("Elementos verificados...")
+            for elem in self.elementos_verificados_por_categoria.get(categoria, []):
+                self.verificados_combo.Items.Add(elem)
+            # Selecciona el primer elemento verificado si existe
+            if self.verificados_combo.Items.Count > 1:
+                self.verificados_combo.SelectedIndex = 1
+
+        def on_send_click(self, sender, event):
+            selected_tab = self.tab_control.SelectedItem
+            if selected_tab:
+                categoria = selected_tab.Header
+                normas = self.normas_por_categoria.get(categoria, [])
+                data = { "categoria": categoria, "normas": normas }
+                json_str = json.dumps(data, ensure_ascii=False)
+                resultado = self.enviar_a_verificar_normas(json_str)
+
+                # Procesar la respuesta del backend para mostrar 'elemento: resultado' por linea
+                elementos_resultados = []  # Lista de dicts: {"id":..., "nombre":..., "resultado":...}
+                try:
+                    resultado_json = json.loads(resultado)
+                    if isinstance(resultado_json, list):
+                        elementos_texto = ""
+                        for el in resultado_json:
+                            elemento = el.get('elemento', '')
+                            resultado_elem = el.get('resultado', '')
+                            id_elem = el.get('id', '')
+                            elementos_texto += "{} ({}): {}\r\n".format(elemento, id_elem, resultado_elem)
+                            elementos_resultados.append({
+                                "id": id_elem,
+                                "nombre": elemento,
+                                "resultado": resultado_elem
+                            })
+                        elementos_texto = elementos_texto.strip()
+                    else:
+                        elementos = resultado_json.get("elementos", [])
+                        elementos_texto = "\r\n".join(["{} ({})".format(e.get('elemento',''), e.get('id','')) for e in elementos])
+                        for el in elementos:
+                            elementos_resultados.append({
+                                "id": el.get('id', ''),
+                                "nombre": el.get('elemento', ''),
+                                "resultado": ""
+                            })
+                except Exception:
+                    elementos_texto = resultado
+                    elementos_resultados = []
+
+                self.tab_boxes[categoria].Text = elementos_texto
+                self.elementos_verificados_por_categoria[categoria] = elementos_resultados
+                self.actualizar_combo_verificados(categoria)
 
         self.normas_por_categoria = {
             "Muros": [],
@@ -244,6 +336,22 @@ class ChatBotWindow(Window):
             "Habitaciones": []
         }
         self.Content = grid
+
+    def on_tab_changed(self, sender, event):
+        selected_tab = self.tab_control.SelectedItem
+        if selected_tab:
+            categoria = selected_tab.Header
+            self.actualizar_combo_verificados(categoria)
+
+    def actualizar_combo_verificados(self, categoria):
+        self.verificados_combo.Items.Clear()
+        self.verificados_combo.Items.Add("Elementos verificados...")
+        for elem in self.elementos_verificados_por_categoria.get(categoria, []):
+            display = "{} ({})".format(elem['nombre'], elem['id'])
+            self.verificados_combo.Items.Add(display)
+        # Selecciona el primer elemento verificado si existe
+        if self.verificados_combo.Items.Count > 1:
+            self.verificados_combo.SelectedIndex = 1
 
     def actualizar_normas_categoria(self, categoria, contexto=""):
         # Limpiar el input de ChatBotWindow cada vez que se actualizan normas
@@ -272,15 +380,39 @@ class ChatBotWindow(Window):
             json_str = json.dumps(data, ensure_ascii=False)
             resultado = self.enviar_a_verificar_normas(json_str)
 
-            # Solo listar la respuesta en la pestana
+            # Procesar la respuesta del backend para mostrar 'elemento: resultado' por linea
+            elementos_resultados = []  # Lista de dicts: {"id":..., "nombre":..., "resultado":...}
             try:
                 resultado_json = json.loads(resultado)
-                elementos = resultado_json.get("elementos", [])
-                elementos_texto = "\r\n".join(elementos)
+                if isinstance(resultado_json, list):
+                    elementos_texto = ""
+                    for el in resultado_json:
+                        elemento = el.get('elemento', '')
+                        resultado_elem = el.get('resultado', '')
+                        id_elem = el.get('id', '')
+                        elementos_texto += "{} ({}): {}\r\n".format(elemento, id_elem, resultado_elem)
+                        elementos_resultados.append({
+                            "id": id_elem,
+                            "nombre": elemento,
+                            "resultado": resultado_elem
+                        })
+                    elementos_texto = elementos_texto.strip()
+                else:
+                    elementos = resultado_json.get("elementos", [])
+                    elementos_texto = "\r\n".join(["{} ({})".format(e.get('elemento',''), e.get('id','')) for e in elementos])
+                    for el in elementos:
+                        elementos_resultados.append({
+                            "id": el.get('id', ''),
+                            "nombre": el.get('elemento', ''),
+                            "resultado": ""
+                        })
             except Exception:
                 elementos_texto = resultado
+                elementos_resultados = []
 
-            self.tab_boxes[categoria].Text = elementos_texto
+            self.tab_boxes[categoria].Text = "Resultados encontrados, verifica cada elemento en el selectbox inferior"
+            self.elementos_verificados_por_categoria[categoria] = elementos_resultados
+            self.actualizar_combo_verificados(categoria)
 
     def enviar_a_verificar_normas(self, json_data):
         try:
@@ -306,6 +438,68 @@ class ChatBotWindow(Window):
 
         except Exception as ex:  # type: ignore
             return "Error al enviar: " + str(ex)
+
+    def on_verificado_seleccionado(self, sender, event):
+        selected_tab = self.tab_control.SelectedItem
+        if not selected_tab:
+            return
+        categoria = selected_tab.Header
+        idx = self.verificados_combo.SelectedIndex
+        if idx <= 0:
+            return
+        display = self.verificados_combo.SelectedItem
+        # Busca el elemento por display
+        elementos = self.elementos_verificados_por_categoria.get(categoria, [])
+        seleccionado = None
+        for elem in elementos:
+            if "{} ({})".format(elem['nombre'], elem['id']) == display:
+                seleccionado = elem
+                break
+        if seleccionado and seleccionado["resultado"]:
+            self.tab_boxes[categoria].Text = "{}".format(seleccionado['resultado'])
+        else:
+            self.tab_boxes[categoria].Text = "[No se encontro resultado para el elemento seleccionado]"
+
+    def on_seleccionar_plano_click(self, sender, event):
+        selected_tab = self.tab_control.SelectedItem
+        if not selected_tab:
+            return
+        categoria = selected_tab.Header
+        idx = self.verificados_combo.SelectedIndex
+        if idx <= 0:
+            return
+        display = self.verificados_combo.SelectedItem
+        elementos = self.elementos_verificados_por_categoria.get(categoria, [])
+        seleccionado = None
+        for elem in elementos:
+            if "{} ({})".format(elem['nombre'], elem['id']) == display:
+                seleccionado = elem
+                break
+        if seleccionado:
+            id_elemento = seleccionado['id']
+            # Aqui llama a tu funcion para seleccionar el elemento en el plano usando el id
+            self.seleccionar_en_plano_por_id(id_elemento)
+
+    def seleccionar_en_plano_por_id(self, id_elemento):
+        try:
+            uidoc = __revit__.ActiveUIDocument
+            doc = uidoc.Document
+
+            if isinstance(id_elemento, str):
+                id_elemento = int(id_elemento)
+
+            eid = ElementId(id_elemento)
+            elemento = doc.GetElement(eid)
+
+            if elemento:
+                uidoc.Selection.SetElementIds(List[ElementId]([eid]))
+                uidoc.ShowElements(eid)
+                print("Elemento seleccionado: {}".format(elemento.Name))
+            else:
+                System.Windows.MessageBox.Show("Elemento con ID {} no encontrado.".format(id_elemento))
+        except Exception as e:
+            System.Windows.MessageBox.Show("Error al seleccionar el elemento: {}".format(str(e)))
+
 
 win = ChatBotWindow()
 win.ShowDialog()
